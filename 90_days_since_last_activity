@@ -1,0 +1,33 @@
+SELECT 
+    *,
+    CASE 
+        WHEN days_since_active = 0 THEN '0'
+        WHEN days_since_active < 10 THEN '1-9'
+        WHEN days_since_active < 20 THEN '10-19'
+        WHEN days_since_active < 30 THEN '20-29'
+        WHEN days_since_active < 40 THEN '30-39'
+        WHEN days_since_active < 50 THEN '40-49'
+        WHEN days_since_active < 60 THEN '50-59'
+        WHEN days_since_active < 70 THEN '60-69'
+        WHEN days_since_active < 80 THEN '70-79'
+        WHEN days_since_active < 90 THEN '80-89'
+        ELSE '90+ days'
+    END AS cat_days
+FROM (
+
+Select 
+user_id,
+up.value.string_value as registration_type,
+  MAX(DATE(TIMESTAMP_MICROS(user_info.last_active_timestamp_micros))) AS last_active_date,
+  FORMAT_DATE('%Y-%m-%d', CURRENT_DATE()) AS current_date,
+  DATE_DIFF(CURRENT_DATE(), MAX(DATE(TIMESTAMP_MICROS(user_info.last_active_timestamp_micros))), DAY) AS days_since_active
+FROM
+  `my.schema.table`
+  LEFT JOIN
+  UNNEST(user_properties) AS up
+WHERE DATE(TIMESTAMP_MICROS(user_info.last_active_timestamp_micros)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 89 DAY)
+GROUP BY 
+  user_id,registration_type
+ORDER BY 
+  days_since_active DESC
+)
