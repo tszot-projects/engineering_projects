@@ -1,0 +1,14 @@
+query GetBoardItems {
+  boards(ids: 123456789) {
+    items_page {
+      items {
+        id
+        name
+        column_values {
+          id
+          text
+        }
+      }
+    }
+  }
+}
