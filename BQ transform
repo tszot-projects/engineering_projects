@@ -1,0 +1,153 @@
+/*
+ This query denormalizes Google Analytics 4 (GA4) BigQuery export data for a specific date.
+ It transforms the nested structure of GA4 events and user properties into a flatter, more easily queryable format.  
+ The query first unnests the event_params and user_properties arrays, handling different data types within them.
+ Then, it pivots these unnested rows into columns using conditional aggregation, creating columns for specific event parameters and user properties like page_title, ga_session_id.
+
+The data is being pulled from the `events_*` tables in BigQuery, which are part of the Google Analytics 4 (GA4) export schema.The dataset and table are typically partitioned by date, and the data includes event parameters, user properties, and other associated data.
+*/
+
+WITH user_events AS (
+  SELECT
+    user_pseudo_id,
+    event_date,
+    event_name,
+    event_timestamp,
+    event_server_timestamp_offset,
+    batch_event_index,
+    batch_ordering_id,
+    batch_page_id,
+    event_previous_timestamp,
+    event_value_in_usd,
+    event_bundle_sequence_id,
+    ep.key AS event_key,
+	  --Handle event parameter values of different types (string, int, float, double)
+    COALESCE(ep.value.string_value,CAST(ep.value.int_value AS STRING),CAST(ep.value.float_value AS STRING),
+    CAST(ep. value.double_value AS STRING) ) AS event_value,
+    user.key AS user_key,
+	  --Handle user property values of different types (string, int, float, double)
+    COALESCE(user.value.string_value, CAST(user.value.int_value AS STRING),CAST(user.value.float_value AS STRING),
+    CAST(user. value.double_value AS STRING)) AS user_value,
+    geo.city AS city,
+    geo.country AS country,
+    geo.continent AS continent,
+    app_info.id AS app_id,
+    app_info.version AS app_version,
+    app_info.install_store AS install_store,
+    app_info.install_source AS install_source,
+    device.category AS device_category,
+    device.operating_system AS operating_system,
+    device.operating_system_version AS os_version,
+    device.language AS device_language,
+    device.browser AS device_browser,
+    device.browser_version AS device_browser_version,
+    device.web_info.browser AS web_browser,
+    device.web_info.browser_version AS web_browser_version,
+    device.web_info.hostname AS web_hostname,
+    device.mobile_brand_name AS brand,
+    device.mobile_model_name AS model,
+    session_traffic_source_last_click.manual_campaign.campaign_name AS campaign_name,
+    session_traffic_source_last_click.manual_campaign.source AS source,
+    session_traffic_source_last_click.manual_campaign.medium AS medium,
+    session_traffic_source_last_click.manual_campaign.content AS content,
+    user_first_touch_timestamp AS first_touch,
+    platform
+  FROM
+    `analytics_331134307.events_*`
+	  --Unnest event parameters
+    left join UNNEST(event_params) AS ep 
+	  --Unnest user properties
+    left join UNNEST(user_properties) AS user 
+  WHERE
+    --_TABLE_SUFFIX IN ('20250125') 
+    _TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 5 DAY))
+),
+event_info AS (
+  --Aggregates the data from user_events ,pivoting event parameters and user properties into columns.
+  SELECT
+    user_pseudo_id,
+    event_name,
+    --FORMAT_DATE("%Y-%m-%d", PARSE_DATE("%Y%m%d", event_date)) as event_date, 
+    PARSE_DATE('%Y%m%d', event_date) as event_date,
+    FORMAT_TIMESTAMP("%Y-%m-%d %H:%M:%S", DATETIME(TIMESTAMP_MICROS(event_timestamp), "America/New_York")) as event_time,
+    --Pivoting event parameters and user properies using MAX and CASE statements. This creates columns for specific parameters.
+    MAX(CASE WHEN user_key = 'Registration_Type' THEN user_value END) AS Registration_Type,
+    MAX(CASE WHEN user_key =  'user_id' THEN user_value END) AS user_id,
+    MAX(CASE WHEN event_key = 'ga_session_id' THEN event_value END) AS ga_session_id,
+    MAX(CASE WHEN event_key = 'ga_session_number' THEN event_value END) AS ga_session_number,
+    MAX(CASE WHEN event_key = 'page_title' THEN event_value END) AS page_title,
+    MAX(CASE WHEN event_key = 'page_location' THEN event_value END) AS page_location,
+    MAX(CASE WHEN event_key = 'page_referrer' THEN event_value END) AS page_referrer,
+    MAX(CASE WHEN event_key = 'firebase_screen_class' THEN event_value END) AS firebase_screen_class,
+    MAX(CASE WHEN event_key = 'firebase_screen_id' THEN event_value END) AS firebase_screen_id,
+    MAX(CASE WHEN event_key = 'firebase_event_origin' THEN event_value END) AS firebase_event_origin,
+    MAX(CASE WHEN event_key = 'engagement_time_msec' THEN event_value END) AS engagement_time_msec,
+    MAX(CASE WHEN event_key = 'Section' THEN event_value END) AS Section,
+    MAX(CASE WHEN event_key = 'UserType' THEN event_value END) AS UserType,
+    MAX(CASE WHEN event_key = 'Name' THEN event_value END) AS Name,
+    MAX(CASE WHEN event_key = 'Title' THEN event_value END) AS Title,
+    MAX(CASE WHEN event_key = 'Search_Keyword' THEN event_value END) AS Search_Keyword,
+    MAX(CASE WHEN event_key = 'method' THEN event_value END) AS login_method,
+    MAX(CASE WHEN event_key = 'Transition_Count' THEN event_value END) AS Transition_Count,
+    MAX(CASE WHEN event_key = 'Transition_Path' THEN event_value END) AS Transition_Path,
+    MAX(CASE WHEN event_key = 'Current_Screen' THEN event_value END) AS Current_Screen,
+    MAX(CASE WHEN event_key = 'Previous_Screen' THEN event_value END) AS Previous_Screen,
+    MAX(CASE WHEN event_key = 'Tags' THEN event_value END) AS Tags,
+    MAX(CASE WHEN event_key = 'connectionRequestee_ID' THEN event_value END) AS connectionRequestee_ID,
+    MAX(CASE WHEN event_key = 'link_text' THEN event_value END) AS link_text,
+    MAX(CASE WHEN event_key = 'link_url' THEN event_value END) AS link_url,
+
+	  --Aggregating user properties
+    MAX(CASE WHEN user_key = 'first_open_time' THEN user_value END) AS first_open_time,
+    event_server_timestamp_offset,
+    batch_event_index,
+    batch_ordering_id,
+    batch_page_id,
+    event_previous_timestamp,
+    event_value_in_usd,
+    event_bundle_sequence_id,
+	  --Geo-location, app, and device info
+    MAX(city) AS geo_city,
+    MAX(country) AS geo_country,
+    MAX(continent) AS geo_continent,
+    MAX(app_id) AS app_info_id,
+    MAX(app_version) AS app_info_version,
+    MAX(install_store) AS app_info_install_store,
+    MAX(install_source) AS app_info_install_source,
+    MAX(device_category) AS device_category,
+    MAX(operating_system) AS device_operating_system,
+    MAX(os_version) AS device_operating_system_version,
+    MAX(device_language) AS device_language,
+    MAX(device_browser) AS device_browser,
+    MAX(device_browser_version) AS device_browser_version,
+    MAX(web_browser) AS device_web_browser,
+    MAX(web_browser_version) AS device_web_browser_version,
+    MAX(web_hostname) AS device_web_hostname,
+    MAX(brand) AS device_brand,
+    MAX(model) AS device_model,
+    MAX(campaign_name) AS campaign_name,
+    MAX(source) AS source,
+    MAX(medium) AS medium,
+    MAX(content) AS content,
+    MAX(first_touch) AS first_touch,
+    MAX(platform) AS platform,
+    event_timestamp --orginal event timestamp used for ordering.
+  FROM
+    user_events
+	--Grouping by user and event details to get the unique rows as per below documentation:
+	--https://support.google.com/analytics/answer/7029846?hl=en&ref_topic=9359001#zippy=%2Cevent%2Csession-traffic-source-last-click%2Cuser 
+
+  GROUP BY 
+    user_pseudo_id,
+    event_date,
+    event_name,
+    event_timestamp,
+    event_server_timestamp_offset,
+    batch_event_index,
+    batch_ordering_id,
+    batch_page_id,
+    event_previous_timestamp,
+    event_value_in_usd,
+    event_bundle_sequence_id
+)
+SELECT * FROM event_info order by  user_pseudo_id,event_date,event_timestamp
